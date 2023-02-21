@@ -6,8 +6,12 @@ env:
   FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
 
 jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-20.04
+
   test:
-    name: Build and run tests
+    name: Run tests
     runs-on: ubuntu-20.04
 
     services:
@@ -32,8 +36,9 @@ jobs:
         with:
           otp-version: '25.1' # Define the OTP version [required]
           elixir-version: '1.14.0' # Define the elixir version [required]
-      - name: Restore dependencies cache
+      - name: Retrieve dependencies cache
         uses: actions/cache@v2
+        id: mix-cache # id to use in retrieve action
         with:
           path: deps
           key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
@@ -44,7 +49,11 @@ jobs:
           path: _build
           key: ${{ runner.os }}-mix-${{ hashFiles('**/mix.lock') }}
       - name: Install dependencies
-        run: mix deps.get
+        if: steps.mix-cache.outputs.cache-hit != 'true'
+        run: |
+          mix local.rebar --force
+          mix local.hex --force
+          mix deps.get
       - name: Install npms
         run: npm install
         working-directory: assets
@@ -54,9 +63,18 @@ jobs:
       - name: Run typescript tests
         run: npm test
         working-directory: assets
+      - name: build assets
+        run: mix esbuild default
+      - name: seed default user
+        run: mix ecto.seed
       - name: build api docs
         run: npm run analyze
         working-directory: assets
+      - name: Run axe-core tests with pa11y-ci
+        run: |
+          mix phx.server &
+          sleep 10
+          npm run test-pa11y --prefix assets
       - name: Run elixir tests
         run: mix test
   deploy:
